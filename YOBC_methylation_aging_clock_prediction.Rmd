@@ -1,0 +1,191 @@
+---
+title: "Methylation with PAM50 subtypes and aging clock prediciton"
+author: "Jiang Li"
+output: html_document
+date: "2025-04-18"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## DNA methylation vs PAM50/TNBC subtypes
+```{r}
+mean.methylation<-colMeans(metabric.methylation, na.rm = T) %>% as.data.frame()
+mean.methylation<-mean.methylation %>% rownames_to_column('sample') %>% set_colnames(c('PATIENT_ID','methy.level'))
+mean.methylation<-mean.methylation %>% inner_join(metabric.pheno)
+
+ggscatter(mean.methylation, 
+          x = "AGE_AT_DIAGNOSIS", y = 'methy.level', 
+          xlab='',ylab='',palette = 'Dark2',
+          shape = 21, size = 1, # Points color, shape and size
+          add = "reg.line",  # Add regressin line
+          add.params = list(linetype='dashed'), # Customize reg. line
+          conf.int = T, # Add confidence interval
+          cor.coef = TRUE, # Add correlation coefficient. see ?stat_cor
+          cor.coeff.args = list(method = "pearson", label.sep = "\n")
+)+labs(x='Age', y='Average methylation level (beta value)', color='',fill='')
+
+ggscatter(mean.methylation, 
+          x = "AGE_AT_DIAGNOSIS", y = 'methy.level', alpha=0.15, fill='PAM50_SUBTYPE',
+          xlab='',ylab='',palette = c('#462255','#AA4465','#FFA69E','#93E1D8','#004CAA'),
+          color='PAM50_SUBTYPE',
+          shape = 21, size = 1, # Points color, shape and size
+          add = "reg.line",  # Add regressin line
+          add.params = list(linetype='dashed'), # Customize reg. line
+          conf.int = F, # Add confidence interval
+          cor.coeff.args = list(method = "pearson", label.sep = "\n")
+)+labs(x='Age', y='Average methylation level (beta value)', color='',fill='')+
+  stat_cor(aes(color = PAM50_SUBTYPE), label.x = 25)+theme(legend.position = 'none')
+
+ggscatter(mean.methylation, 
+          x = "AGE_AT_DIAGNOSIS", y = 'methy.level', alpha=0.15, fill='TNBC_SUBTYPE',
+          xlab='',ylab='',palette = 'Dark2',
+          color='TNBC_SUBTYPE',
+          shape = 21, size = 1, # Points color, shape and size
+          add = "reg.line",  # Add regressin line
+          add.params = list(linetype='dashed'), # Customize reg. line
+          conf.int = F, # Add confidence interval
+          cor.coeff.args = list(method = "pearson", label.sep = "\n")
+)+labs(x='Age', y='Average methylation level (beta value)', color='',fill='')+
+  stat_cor(aes(color = TNBC_SUBTYPE), label.x = 25)+theme(legend.position = 'none')
+```
+
+## Aging clock prediction robustness comparision
+### Our model
+```{r}
+library(dnaMethyAge)
+load(GSE41037.RData)
+model.pred <-methy.model.log$inverse.F(age=predict(methy.model.log$fit, 
+                                                   t(GSE41037.expr[rownames(coef(methy.model.log$fit))[2:657],])))
+cor.test(model.pred[,1], as.numeric(GSE41037.pheno$Age))
+Metrics::mae(model.pred[,1],as.numeric(GSE41037.pheno$Age))
+
+data.frame(
+  'age'=as.numeric(GSE41037.pheno$Age), 'DNAm.age'=model.pred[,1]
+) %>% ggscatter(x = "age", y = "DNAm.age", alpha = 0.2,
+                xlab='Chronological age',ylab='Predicted DNAm age', xlim=c(0,100), ylim=c(0,100),
+                title = 'Our model',
+                color = "black", shape = 21, size = 1,add = "reg.line", 
+                add.params = list(color = "black", linetype='dashed'), # Customize reg. line
+                conf.int = T, cor.coef = TRUE, 
+                cor.coeff.args = list(method = "pearson", label.x = 25, label.y = 80, label.sep = "\n")
+)
+```
+
+### HorvathS2018
+```{r}
+load("HorvathS2018.rda")
+HorvathS2018 <- coefs
+table(HorvathS2018$Probe %in% rownames(exprs(GSE41037[[1]])))
+GSE41037.probe.expr <- exprs(GSE41037[[1]])[HorvathS2018$Probe[HorvathS2018$Probe %in% rownames(exprs(GSE41037[[1]]))],GSE41037.pheno$geo_accession]
+GSE41037.probe.expr <- as.data.frame(GSE41037.probe.expr)
+missing.probe <- HorvathS2018$Probe[!(HorvathS2018$Probe %in% rownames(exprs(GSE41037[[1]])))]
+missing.probe <- missing.probe[str_detect(missing.probe, 'cg')]
+tmp.missing <- as.data.frame(matrix(NA, nrow=length(missing.probe), ncol = ncol(GSE41037.probe.expr)))
+colnames(tmp.missing) <- colnames(GSE41037.probe.expr)
+rownames(tmp.missing) <- missing.probe
+GSE41037.probe.expr <- GSE41037.probe.expr %>% bind_rows(as.data.frame(tmp.missing))
+rm(coefs)
+age.pred <- suppressWarnings(dnaMethyAge::methyAge(GSE41037.probe.expr, clock='HorvathS2018', inputation=F))
+age.pred.impute <- suppressWarnings(dnaMethyAge::methyAge(GSE41037.probe.expr, clock='HorvathS2018', inputation=T))
+cor.test(age.pred.impute$mAge,as.numeric(GSE41037.pheno$Age))
+Metrics::mae(age.pred.impute$mAge,as.numeric(GSE41037.pheno$Age))
+
+data.frame(
+  'age'=as.numeric(GSE41037.pheno$Age), 'DNAm.age'=age.pred.impute$mAge
+) %>% ggscatter(x = "age", y = "DNAm.age", alpha = 0.2,
+          xlab='Chronological age',ylab='Predicted DNAm age', xlim=c(0,100), ylim=c(0,100),
+          title = 'HorvathS2018',
+          color = "black", shape = 21, size = 1,add = "reg.line", 
+          add.params = list(color = "black", linetype='dashed'), # Customize reg. line
+          conf.int = T, cor.coef = TRUE, 
+          cor.coeff.args = list(method = "pearson", label.x = 25, label.y = 80, label.sep = "\n")
+)
+```
+
+
+### 
+```{r}
+load("ShirebyG2020.rda")
+ShirebyG2020 <- coefs
+table(ShirebyG2020$Probe %in% rownames(exprs(GSE41037[[1]])))
+GSE41037.probe.expr <- exprs(GSE41037[[1]])[ShirebyG2020$Probe[ShirebyG2020$Probe %in% rownames(exprs(GSE41037[[1]]))],GSE41037.pheno$geo_accession]
+GSE41037.probe.expr <- as.data.frame(GSE41037.probe.expr)
+missing.probe <- ShirebyG2020$Probe[!(ShirebyG2020$Probe %in% rownames(exprs(GSE41037[[1]])))]
+missing.probe <- missing.probe[str_detect(missing.probe, 'cg')]
+tmp.missing <- as.data.frame(matrix(NA, nrow=length(missing.probe), ncol = ncol(GSE41037.probe.expr)))
+colnames(tmp.missing) <- colnames(GSE41037.probe.expr)
+rownames(tmp.missing) <- missing.probe
+GSE41037.probe.expr <- GSE41037.probe.expr %>% bind_rows(as.data.frame(tmp.missing))
+rm(coefs)
+age.pred <- suppressWarnings(dnaMethyAge::methyAge(GSE41037.probe.expr, clock='ShirebyG2020', inputation=F))
+age.pred.impute <- suppressWarnings(dnaMethyAge::methyAge(GSE41037.probe.expr, clock='ShirebyG2020', inputation=T))
+cor.test(age.pred.impute$mAge,as.numeric(GSE41037.pheno$Age))
+Metrics::mae(age.pred.impute$mAge,as.numeric(GSE41037.pheno$Age))
+data.frame(
+  'age'=as.numeric(GSE41037.pheno$Age), 'DNAm.age'=age.pred.impute$mAge
+) %>% ggscatter(x = "age", y = "DNAm.age", alpha = 0.2,
+          xlab='Chronological age',ylab='Predicted DNAm age', xlim=c(0,100), ylim=c(0,100),
+          title = 'ShirebyG2020',
+          color = "black", shape = 21, size = 1,add = "reg.line", 
+          add.params = list(color = "black", linetype='dashed'), # Customize reg. line
+          conf.int = T, cor.coef = TRUE, 
+          cor.coeff.args = list(method = "pearson", label.x = 25, label.y = 80, label.sep = "\n")
+)
+```
+
+### McEwenL2019
+```{r}
+load("McEwenL2019.rda")
+McEwenL2019 <- coefs
+table(McEwenL2019$Probe %in% rownames(exprs(GSE41037[[1]])))
+GSE41037.probe.expr <- exprs(GSE41037[[1]])[McEwenL2019$Probe[McEwenL2019$Probe %in% rownames(exprs(GSE41037[[1]]))],GSE41037.pheno$geo_accession]
+GSE41037.probe.expr <- as.data.frame(GSE41037.probe.expr)
+missing.probe <- McEwenL2019$Probe[!(McEwenL2019$Probe %in% rownames(exprs(GSE41037[[1]])))]
+missing.probe <- missing.probe[str_detect(missing.probe, 'cg')]
+tmp.missing <- as.data.frame(matrix(NA, nrow=length(missing.probe), ncol = ncol(GSE41037.probe.expr)))
+colnames(tmp.missing) <- colnames(GSE41037.probe.expr)
+rownames(tmp.missing) <- missing.probe
+GSE41037.probe.expr <- GSE41037.probe.expr %>% bind_rows(as.data.frame(tmp.missing))
+rm(coefs)
+age.pred <- suppressWarnings(dnaMethyAge::methyAge(GSE41037.probe.expr, clock='McEwenL2019', inputation=F))
+age.pred.impute <- suppressWarnings(dnaMethyAge::methyAge(GSE41037.probe.expr, clock='McEwenL2019', inputation=T))
+cor.test(age.pred.impute$mAge,as.numeric(GSE41037.pheno$Age))
+Metrics::mae(age.pred.impute$mAge,as.numeric(GSE41037.pheno$Age))
+save.image('~/Projects/SYSUC-BC-Young-onset/Methylation_dataset/Model_robustness_test/McEwenL2019_on_27K.RData')
+
+data.frame(
+  'age'=as.numeric(GSE41037.pheno$Age), 'DNAm.age'=age.pred.impute$mAge
+) %>% ggscatter(x = "age", y = "DNAm.age", alpha = 0.2,
+          xlab='Chronological age',ylab='Predicted DNAm age', xlim=c(0,100), ylim=c(0,100),
+          title = 'McEwenL2019',
+          color = "black", shape = 21, size = 1,add = "reg.line", 
+          add.params = list(color = "black", linetype='dashed'), # Customize reg. line
+          conf.int = T, cor.coef = TRUE, 
+          cor.coeff.args = list(method = "pearson", label.x = 25, label.y = 80, label.sep = "\n")
+)
+```
+
+## Paired tumor/adj-normal aging rate
+```{r}
+# ============ SYSU tumor/normal ===========
+sysu.N <-sysu.normal.tumor.methy$sample[str_detect(sysu.normal.tumor.methy$sample,'N')]
+sysu.N.T <- str_replace_all(sysu.normal.tumor.methy$sample[str_detect(sysu.normal.tumor.methy$sample,'N')], 'N','T')
+sysu.N.T<-sysu.N.T[sysu.N.T %in% sysu.normal.tumor.methy$sample]
+tmp <- sysu.normal.tumor.methy %>% filter(sample %in% c(
+  sysu.N.T,
+  str_replace_all(sysu.N.T, 'T','N')
+)) 
+
+tmp[,c('sample','aging.rate')] %>% filter(str_detect(sample,'N')) %>% dplyr::mutate(sample=str_replace_all(sample,'N','')) %>% 
+  dplyr::rename(Adj.normal=aging.rate) %>% inner_join(
+    tmp[,c('sample','aging.rate')] %>% filter(str_detect(sample,'T')) %>% dplyr::mutate(sample=str_replace_all(sample,'T','')) %>% 
+      dplyr::rename(Tumor=aging.rate)
+  ) %>% ggpaired(cond1 = "Adj.normal", cond2 = "Tumor",line.color = "gray", line.size = 0.5,
+                 title='SYSU paired samples',ylab='Aging rate',xlab='')+
+  stat_compare_means(method = 't.test',label = "p.signif",comparisons = list(
+    c('Tumor','Adj.normal')
+  ))
+```
+

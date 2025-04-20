@@ -1,0 +1,178 @@
+---
+title: "Young-onset breast cancer multi-omics analysis"
+author: "Jiang Li"
+output: html_document
+date: "2025-04-17"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Age stratification
+```{r}
+metabric.pheno<-metabric.pheno %>% dplyr::mutate(
+  age.40.65=case_when(
+    AGE_AT_DIAGNOSIS <=40 ~'40-',
+    AGE_AT_DIAGNOSIS > 40 & AGE_AT_DIAGNOSIS <=55 ~ '41-55',
+    AGE_AT_DIAGNOSIS > 55 & AGE_AT_DIAGNOSIS <=65 ~ '56-65',
+    AGE_AT_DIAGNOSIS > 65 ~ '66+'
+  )
+)
+```
+
+
+## Somatic mutation
+```{r}
+## ========= Somatic mutation vs Age group============
+vc_cols <- RColorBrewer::brewer.pal(n = 8, name = 'Paired')
+names(vc_cols) <- c(
+  'Frame_Shift_Del',
+  'Missense_Mutation',
+  'Nonsense_Mutation',
+  'Multi_Hit',
+  'Frame_Shift_Ins',
+  'In_Frame_Ins',
+  'Splice_Site',
+  'In_Frame_Del'
+)
+oncoplot(maf = metabric.snv.maf, top = 20,clinicalFeatures = c('age.40.65'),
+         sortByAnnotation = TRUE,drawRowBar = F,showTitle=F,
+         colors =vc_cols, sepwd_samples=0,sepwd_genes=0,
+         drawColBar=F,annotationOrder=c('40-','41-55','56-65','66+'),
+         annotationColor = list('age.40.65'=c('40-'='#DE7A64','41-55'='#3F405A','56-65'='#F1C986','66+'='#83B29E')))
+```
+
+
+## Copy number alteration
+```{r}
+## ======== SCNA vs Age group ==========
+p1<-metabric.scna %>% ggboxplot(x = "age.40.65", y = 'scna.counts', color = 'age.40.65', palette = age.group.color,
+                            title='', lwd=1.2, order=c('40-','41-55','56-65','66+'))+
+  stat_compare_means(method = "t.test", label = "p.signif", comparisons = list(
+    c('40-','41-55'),c('40-','56-65'),c('40-','66+')
+  ))+stat_compare_means(label.y.npc = 0.9)+
+  labs(x='',y=paste0('SCNA counts'), title = '',color='')+
+  theme(legend.position = 'none')
+
+p2<-metabric.scna %>% dplyr::mutate(PAM50_SUBTYPE=as.factor(PAM50_SUBTYPE)) %>% 
+  ggboxplot(x = "PAM50_SUBTYPE", y = 'scna.counts', color = "PAM50_SUBTYPE", 
+            palette = pam50.col, order = c('Basal','Her2','LumA','LumB','Normal'),
+            facet.by = 'age.40.65',title='', lwd=1.2, ncol=4)+
+  stat_compare_means(method = "t.test", label = "p.signif", ref.group = 'Basal')+
+  stat_compare_means(label.y.npc = 0.8, label.x.npc = 0.4)+
+  labs(x='',y=paste0(''), title = '',color='')+
+  theme(legend.position = 'none')
+cowplot::plot_grid(plotlist = list(p1,p2), rel_widths = c(1,4))
+rm(p1,p2)
+
+metabric.scna %>% dplyr::mutate(PAM50_SUBTYPE=as.factor(PAM50_SUBTYPE)) %>% 
+  ggboxplot(x = "age.40.65", y = 'scna.counts', color = "age.40.65", 
+            palette = age.group.color, order = c('40-','41-55','56-65','66+'),
+            facet.by = 'PAM50_SUBTYPE',title='', lwd=1.2, ncol=5)+
+  stat_compare_means(method = "t.test", label = "p.signif", ref.group = '40-')+
+  stat_compare_means(label.y.npc = 0.9, label.x.npc = 0.4)+
+  labs(x='',y=paste0('SCNA counts'), title = '',color='')+
+  theme(legend.position = 'none')
+```
+
+## Pathway enrichment analysis
+```{r}
+## =========GSEA pathway heatmap analysis============
+library(HTSanalyzeR2)
+library(org.Hs.eg.db)
+identical(colnames(metabric.expr), metabric.pheno$PATIENT_ID)
+
+metabric.DE.age<-list(
+  'Basal'=list('40-'=NA,'41-55'=NA,'56-65'=NA,'66+'=NA),
+  'Her2'=list('40-'=NA,'41-55'=NA,'56-65'=NA,'66+'=NA),
+  'LumA'=list('40-'=NA,'41-55'=NA,'56-65'=NA,'66+'=NA),
+  'LumB'=list('40-'=NA,'41-55'=NA,'56-65'=NA,'66+'=NA),
+  'Normal'=list('40-'=NA,'41-55'=NA,'56-65'=NA,'66+'=NA)
+)
+
+for(j in unique(metabric.pheno$age.40.65)){
+  for(i in unique(metabric.pheno$PAM50_SUBTYPE)){
+    samples<-metabric.pheno[metabric.pheno$age.40.65 == j,] ## samples of group 40-
+    grp<-ifelse(samples$PAM50_SUBTYPE==i,1,0) ## basal
+    metabric.DE.age[[i]][[j]]<-limma::lmFit(object = metabric.expr[,samples$PATIENT_ID], design = model.matrix(~grp)) %>%
+      limma::eBayes() %>% limma::topTable(coef = 2, number = Inf, adjust.method = 'BH')
+  }
+}
+rm(i,j,samples,grp)
+
+metabric.pathway<-list(
+  'Basal'=list('40-'=NA,'41-55'=NA,'56-65'=NA,'66+'=NA),
+  'Her2'=list('40-'=NA,'41-55'=NA,'56-65'=NA,'66+'=NA),
+  'LumA'=list('40-'=NA,'41-55'=NA,'56-65'=NA,'66+'=NA),
+  'LumB'=list('40-'=NA,'41-55'=NA,'56-65'=NA,'66+'=NA),
+  'Normal'=list('40-'=NA,'41-55'=NA,'56-65'=NA,'66+'=NA)
+)
+
+if (requireNamespace("doParallel", quietly=TRUE)) {
+  doParallel::registerDoParallel(cores=20)
+}
+
+load('91_geneset2ENTREZID.rda')
+load("aging_gene.rda")
+aging.gene.entrez<-lapply(aging.gene, function(x){
+  gene<-mapIds(org.Hs.eg.db, keys = x, keytype = 'SYMBOL', column = 'ENTREZID')
+  names(gene)<-NULL
+  gene<-gene[!is.na(gene)]
+  unlist(gene)
+})
+names(aging.gene.entrez)<-toupper(names(aging.gene.entrez))
+geneset2ENTREZID <- c(geneset2ENTREZID, aging.gene.entrez)
+for(i in unique(metabric.pheno$PAM50_SUBTYPE)){
+  for(j in unique(metabric.pheno$age.40.65)){
+    DE.limma<-metabric.DE.age[[i]][[j]]
+    phenotypes<-as.vector(DE.limma$logFC)
+    names(phenotypes)<-rownames(DE.limma)
+    gsca <- GSCA(listOfGeneSetCollections = list(mygeneset =geneset2ENTREZID), geneList=phenotypes)
+    gsca <- preprocess(gsca, species="Hs", initialIDs="SYMBOL", keepMultipleMappings=TRUE, 
+                       duplicateRemoverMethod="max", orderAbsValue=FALSE)
+    gsca_2 <- analyze(gsca, para=list(pValueCutoff=0.05, pAdjustMethod ="BH", 
+                                      nPermutations=1000, minGeneSetSize=1, exponent=1), 
+                      doGSOA=FALSE, doGSEA=TRUE)
+    gsca_3 <- appendGSTerms(gsca_2, msigdbGSCs = "mygeneset") # append gene set terms to replace IDs
+    metabric.pathway[[i]][[j]] <- gsca_3@result$GSEA.results$mygeneset[,1:4]
+  }
+}
+rm(i,j,DE.limma,hits,phenotypes,gsca,gsca_2,gsca_3)
+
+source('~/Projects/SYSUC-BC-Young-onset/R_scripts/pathway_items.R')
+pathway.items$Aging <- names(aging.gene.entrez)
+
+heat.data<-NULL
+for(i in unique(metabric.pheno$PAM50_SUBTYPE)){
+  for(j in unique(metabric.pheno$age.40.65)){
+    df<-metabric.pathway[[i]][[j]][,1:4]
+    df$Adjusted.Pvalue<-(-log10(df$Adjusted.Pvalue + 10^(-3)))
+    df$Adjusted.Pvalue<-ifelse(df$Observed.score > 0, df$Adjusted.Pvalue, -df$Adjusted.Pvalue)
+    df$PAM50<-i
+    df$Age.group<-j
+    heat.data<-rbind(heat.data,df)
+  }
+}
+rm(i,j,df)
+
+#"Signatures" "Pathways"   "Immune"     "Metabolism" "Estimate" "BC_related" "Aging"
+lapply('Aging', function(pathway){
+  df<-heat.data[heat.data$Gene.Set.Term %in% pathway.items[[pathway]],]
+  df<-df %>% tidyr::unite('sample',c(PAM50,Age.group), sep='@',remove=F)
+  df.wide<-pivot_wider(df[,c('sample','Adjusted.Pvalue','Gene.Set.Term')], names_from = sample, values_from = Adjusted.Pvalue) %>%
+    column_to_rownames('Gene.Set.Term')
+  anno.column<-data.frame('sample'=colnames(df.wide)) %>% separate(sample,into=c('PAM50','Age'),sep='@',remove=F) %>% 
+    column_to_rownames('sample') %>% arrange(PAM50,Age)
+  anno.col<-list(
+    PAM50=c('Basal'='#8ECFC9','Her2'='#FFBE7A','LumA'='#FA7F6F','LumB'='#82B0D2','Normal'='#BEB8DC'),
+    Age=c('40-'='#DE7A64','41-55'='#3F405A','56-65'='#F1C986','66+'='#83B29E')
+  )
+  pheatmap::pheatmap(df.wide[pathway.items[[pathway]],rownames(anno.column)], annotation_col = anno.column, annotation_colors = anno.col, main = pathway, cluster_cols = F,
+                     cluster_rows = F,colorRampPalette(c("#4A7F4B", "#FFFFFF", "#B41600"))(100), show_colnames = F, 
+                     annotation_names_col = F,border_color = '#999999',fontsize =10, cellwidth = 20,cellheight=20, 
+                     gaps_col = c(4,8,12,16)
+                     )
+})
+```
+

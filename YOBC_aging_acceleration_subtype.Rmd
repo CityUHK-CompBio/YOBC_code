@@ -1,0 +1,116 @@
+---
+title: "Aging acceleration-based subtype analysis"
+author: "Jiang Li"
+output: html_document
+date: "2025-04-18"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## METABRIC
+```{r}
+aging.rate.col<-c('#ffa974', '#ff715a', '#ff3757')
+
+table(mb.DNAm.age$age.40.65, mb.DNAm.age$gamma.subtype) %>% chisq.test()
+mb.DNAm.age %>% dplyr::group_by(age.40.65, gamma.subtype) %>% count() %>% 
+  ggplot(aes(fill=gamma.subtype, y=n, x=age.40.65)) + 
+  geom_bar(position="fill", stat="identity")+
+  labs(x='',y='Proportion',fill='',title='METABRIC \n Chi-squared test: P = 1.95 × 10-06')+
+  scale_fill_manual(values = aging.rate.col)+theme_pubr()+
+  theme(legend.position="right",
+        plot.title = element_text(color="black", size=15,face="plain",hjust = 0.5,family ="sans"))
+
+## ============== aging rate survival ================
+survfit(Surv(RFS.time.10, RFS.10) ~ gamma.subtype, data=mb.DNAm.age) %>% 
+  ggsurvplot(
+    pval = TRUE,conf.int = F, pval.coord = c(0.3, 0.3),
+    risk.table = T,risk.table.col = "black",size=1,pval.size=8,
+    xlab='Follow up (months)', ylab='RFS (%)',
+    legend.title = '',legend.lab=paste0('G',1:3),
+    ggtheme = theme_classic2(),ylim=c(0.2,1), legend=c(0.15,0.4),
+    font.x = 15,font.y=15,font.main=18,font.legend=15,font.tickslab=12,palette = aging.rate.col
+  )+ggtitle('')
+
+## ============ aging rate vs recurrence, grade, tumor stage ===========
+mb.DNAm.age %>% filter(!is.na(RFS)) %>% 
+  ggboxplot(x= 'RFS',y='aging.rate',color = "black", fill = "gray", xlab='', ylab='Aging rate')+
+  stat_compare_means(method = "t.test", label = "p.signif", comparisons = list(c(
+    '0','1'
+  )))+labs(title='Recurrence')
+
+tmp <-mb.DNAm.age %>% filter(!is.na(RFS))
+table(as.character(tmp$RFS), tmp$gamma.subtype) %>% chisq.test()
+p1<-tmp %>% dplyr::mutate(RFS=as.character(RFS)) %>% 
+  dplyr::group_by(gamma.subtype, RFS) %>% count() %>% 
+  ggplot(aes_string(fill='gamma.subtype', y='n', x='RFS')) + 
+  geom_bar(position="fill", stat="identity")+
+  labs(x='Recurrence',y='Proportion',fill='',
+       title=paste0('METABRIC \n P = 1.24 × 10-4'))+
+  scale_fill_manual(values=aging.rate.col)+theme_pubr()+
+  theme(legend.position="top",
+        plot.title = element_text(color="black", size=15,face="plain",hjust = 0.5,family ="sans"))
+
+tmp <-mb.DNAm.age %>% filter(!is.na(GRADE))
+table(as.character(tmp$GRADE), tmp$gamma.subtype) %>% chisq.test()
+p2<-tmp %>% dplyr::mutate(GRADE=as.character(GRADE)) %>% 
+  dplyr::group_by(gamma.subtype, GRADE) %>% count() %>% 
+  ggplot(aes_string(fill='gamma.subtype', y='n', x='GRADE')) + 
+  geom_bar(position="fill", stat="identity")+
+  labs(x='Grade',y='Proportion',fill='',
+       title=paste0('METABRIC \n P = 2.95 × 10-4'))+
+  scale_fill_manual(values=aging.rate.col)+theme_pubr()+
+  theme(legend.position="top",
+        plot.title = element_text(color="black", size=15,face="plain",hjust = 0.5,family ="sans"))
+
+mb.DNAm.age %>% filter(!is.na(GRADE)) %>% 
+  ggboxplot(x= 'GRADE',y='aging.rate',color = "black", fill = "gray", xlab='', ylab='Aging rate',order = c('1','2','3'))+
+  stat_compare_means(method = "t.test", label = "p.signif", comparisons = list(
+    c('1','2'),c('1','3'),c('2','3')
+  ))+labs(title='GRADE')
+
+tmp <-mb.DNAm.age %>% filter(!is.na(TUMOR_STAGE)) %>% dplyr::mutate(TUMOR_STAGE=ifelse(TUMOR_STAGE %in% c('1','2'),'1-2','3-4'))
+table(as.character(tmp$TUMOR_STAGE), tmp$gamma.subtype) %>% chisq.test()
+p3<-tmp %>% dplyr::mutate(TUMOR_STAGE=as.character(TUMOR_STAGE)) %>% 
+  dplyr::group_by(gamma.subtype, TUMOR_STAGE) %>% count() %>% 
+  ggplot(aes_string(fill='gamma.subtype', y='n', x='TUMOR_STAGE')) + 
+  geom_bar(position="fill", stat="identity")+
+  labs(x='Tumor stage',y='Proportion',fill='',
+       title=paste0('METABRIC \n P = 0.02'))+
+  scale_fill_manual(values=aging.rate.col)+theme_pubr()+
+  theme(legend.position="top",
+        plot.title = element_text(color="black", size=15,face="plain",hjust = 0.5,family ="sans"))
+
+mb.DNAm.age %>% filter(!is.na(TUMOR_STAGE)) %>% dplyr::mutate(TUMOR_STAGE=ifelse(TUMOR_STAGE %in% c('1','2'),'1-2','3-4')) %>% 
+  ggboxplot(x= 'TUMOR_STAGE',y='aging.rate',color = "black", fill = "gray", xlab='', ylab='Aging rate',order = c('1-2','3-4'))+
+  stat_compare_means(method = "t.test", label = "p.signif", comparisons = list(
+    c('1-2','3-4')
+  ))+labs(title='TUMOR STAGE')
+```
+
+## TCGA-BRCA
+```{r}
+table(bc.DNAm.age$age.40.65, bc.DNAm.age$gamma.subtype) %>% chisq.test()
+bc.DNAm.age %>% dplyr::group_by(age.40.65, gamma.subtype) %>% count() %>% 
+  ggplot(aes(fill=gamma.subtype, y=n, x=age.40.65)) + 
+  geom_bar(position="fill", stat="identity")+labs(x='',y='Proportion',fill='',title='TCGA-BRCA \n Chi-squared test: P < 2.20 × 10-16')+
+  scale_fill_manual(values = aging.rate.col)+theme_pubr()+
+  theme(legend.position="right",
+        plot.title = element_text(color="black", size=15,face="plain",hjust = 0.5,family ="sans"))
+```
+
+## SYSUCC
+```{r}
+table(sysu.tumor.methy$age.40.65, sysu.tumor.methy$gamma.subtype) %>% chisq.test()
+sysu.tumor.methy %>% dplyr::group_by(age.40.65, gamma.subtype) %>% count() %>% 
+  ggplot(aes(fill=gamma.subtype, y=n, x=age.40.65)) + 
+  geom_bar(position="fill", stat="identity")+labs(x='',y='Proportion',fill='',title='SYSU \n Chi-squared test: P = 0.003')+
+  scale_fill_manual(values = aging.rate.col)+theme_pubr()+
+  theme(legend.position="right",
+        legend.text=element_text(size = 12,family ="sans"),
+        axis.title= element_text(size = 15,family ="sans"),
+        plot.title = element_text(color="black", size=15,face="plain",hjust = 0.5,family ="sans"),
+        axis.text= element_text(size=15,family ="sans"))
+```
+

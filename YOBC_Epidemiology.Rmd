@@ -1,0 +1,398 @@
+---
+title: "Young-onset breast cancer epidemiology analysis"
+author: "Jiang Li"
+output: html_document
+date: "2025-04-17"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Color information
+
+```{r}
+age.group.color<-c('#DE7A64','#3F405A','#F1C986','#83B29E')
+pam50.col<-c('#8ECFC9','#FFBE7A','#FA7F6F','#82B0D2','#BEB8DC')
+TNBC.col<- c('#5E98D3', '#D86364')
+```
+
+## Age stratification
+```{r}
+metabric.pheno<-metabric.pheno %>% dplyr::mutate(
+  age.40.65=case_when(
+    AGE_AT_DIAGNOSIS <=40 ~'40-',
+    AGE_AT_DIAGNOSIS > 40 & AGE_AT_DIAGNOSIS <=55 ~ '41-55',
+    AGE_AT_DIAGNOSIS > 55 & AGE_AT_DIAGNOSIS <=65 ~ '56-65',
+    AGE_AT_DIAGNOSIS > 65 ~ '66+'
+  )
+)
+```
+
+
+## SEER database
+
+```{r}
+# ============ SEER ==================
+## Age group OS
+survfit(Surv(OS.time.10, OS.10) ~ Age.40.65, data=seer) %>% 
+  ggsurvplot(
+    pval = TRUE,conf.int = F,pval.coord = c(0.3, 0.3),
+    risk.table = T,risk.table.col = "black",pval.size=8,
+    xlab='Follow up (months)', ylab='OS (%)',
+    legend.title = '',legend.lab=c('40-', '41-55','56-65','66+'),
+    ggtheme = theme_classic2(), ylim=c(0.2,1), legend=c(0.3,0.4),
+    font.x = 15,font.y=15,font.main=18,font.legend=15,font.tickslab=12,palette = age.group.color
+  )+ggtitle('SEER')
+
+## =======N stage age group=======
+tmp<-seer %>% filter(clinical_N %in% c('N0','N1','N2','N3')) %>% 
+  dplyr::mutate(clinical_N=str_replace(clinical_N,'a|b|c|d',''))
+table(tmp$Age.40.65, tmp$clinical_N) %>% chisq.test()
+tmp %>% dplyr::mutate(clinical_N=str_replace(clinical_N,'N','')) %>% 
+  dplyr::group_by(Age.40.65, clinical_N) %>% count() %>% 
+  ggplot(aes(fill=clinical_N, y=n, x=Age.40.65)) + 
+  geom_bar(position="fill", stat="identity")+
+  scale_fill_manual(values=c('#DCE6F2','#B9CDE5','#95B3D7','#376092'))+
+  labs(x='',y='Proportion',fill='Stage N',
+       title=paste0('SEER \n P < 2.20 × 10-16',''))+
+  theme_pubr()+
+  theme(legend.position="right",
+        plot.title = element_text(color="black", size=15,face="plain",hjust = 0.5,family ="sans"))
+
+##======= TNBC age group=======
+tnbc.df<-seer %>% filter(!(subtype %in% c('Recode not available','Unknown'))) %>% 
+  dplyr::mutate(subtype=ifelse(str_detect(subtype,'Triple Negative'),'TNBC','non-TNBC'))
+table(tnbc.df$Age.40.65, tnbc.df$subtype) %>% chisq.test()
+tnbc.df %>% dplyr::group_by(Age.40.65, subtype) %>% count() %>% 
+  ggplot(aes(fill=subtype, y=n, x=Age.40.65)) + 
+  geom_bar(position="fill", stat="identity")+
+  labs(x='',y='Proportion',fill='',
+       title='SEER \nP < 2.20 × 10-16')+
+  scale_fill_manual(values=TNBC.col)+theme_pubr()+
+  theme(legend.position="right",
+        plot.title = element_text(color="black", size=15,face="plain",hjust = 0.5,family ="sans"))
+
+## =======age group T stage=======
+table(seer$clinical_T)
+tmp<-seer %>% filter(clinical_T %in% c('T1a','T1b','T1c','T2','T3','T4a','T4b','T4c','T4d')) %>% 
+  dplyr::mutate(clinical_T=str_replace(clinical_T,'a|b|c|d',''))
+table(tmp$clinical_T)
+table(tmp$Age.40.65, tmp$clinical_T) %>% chisq.test()
+
+tmp %>% dplyr::group_by(Age.40.65, clinical_T) %>% count() %>% 
+  ggplot(aes_string(fill='clinical_T', y='n', x='Age.40.65')) + 
+  geom_bar(position="fill", stat="identity")+
+  labs(x='',y='Proportion',fill='Stage T',
+       title=paste0('SEER \nP < 2.20 × 10-16',''))+
+  scale_fill_manual(values=c('#DCE6F2','#B9CDE5','#95B3D7','#376092'))+theme_pubr()+
+  theme(legend.position="right",
+        plot.title = element_text(color="black", size=15,face="plain",hjust = 0.5,family ="sans"))
+rm(tmp)
+
+## =======Stage age group=======
+tmp<-seer %>% filter(Stage %in% c('I','IIA','IIB','IIIA','IIIB','IIIC','IV')) %>% 
+  dplyr::mutate(Stage=str_replace(Stage,'A|B|C',''))
+table(tmp$Age.40.65, tmp$Stage) %>% chisq.test()
+
+tmp %>% dplyr::group_by(Age.40.65, Stage) %>% count() %>% 
+  ggplot(aes_string(fill='Stage', y='n', x='Age.40.65')) + 
+  geom_bar(position="fill", stat="identity")+
+  labs(x='',y='Proportion',fill='TNM stage',
+       title=paste0('SEER \nP < 2.20 × 10-16 ',''))+
+  scale_fill_manual(values=c('#DCE6F2','#B9CDE5','#95B3D7','#376092'))+theme_pubr()+
+  theme(legend.position="right",
+        plot.title = element_text(color="black", size=15,face="plain",hjust = 0.5,family ="sans"))
+
+```
+
+## METABRIC
+
+```{r}
+## =======OS age group=======
+survfit(Surv(OS_MONTHS, OS) ~ age.40.65, data=metabric.pheno) %>% 
+  ggsurvplot(
+    pval = TRUE,conf.int = F,pval.coord = c(0.3, 0.3),
+    risk.table = T,risk.table.col = "black",pval.size=8,
+    xlab='Follow up (months)', ylab='OS (%)',
+    legend.title = '',legend.lab=c('40-', '41-55','56-65','66+'),
+    ggtheme = theme_classic2(), legend=c(0.8,0.8),
+    font.x = 15,font.y=15,font.main=18,font.legend=15,font.tickslab=12,palette = age.group.color
+  )+ggtitle('METABRIC')
+
+##======= RFS age group=======
+survfit(Surv(RFS.time.10, RFS.10) ~ age.40.65, data=metabric.pheno) %>% 
+  ggsurvplot(
+    pval = TRUE,conf.int = F,pval.coord = c(0.3, 0.3),
+    risk.table = T,risk.table.col = "black",pval.size=8,
+    xlab='Follow up (months)', ylab='RFS (%)',
+    legend.title = '',legend.lab=c('40-', '41-55','56-65','66+'),
+    ggtheme = theme_classic2(), ylim=c(0.2,1), legend=c(0.1,0.4),
+    font.x = 15,font.y=15,font.main=18,font.legend=15,font.tickslab=12,palette = age.group.color
+  )+ggtitle('METABRIC')
+
+## ======= age groups vs LNM=======
+table(metabric.pheno$age.40.65, metabric.pheno$LNM) %>% chisq.test()
+metabric.pheno %>% dplyr::group_by(age.40.65, LNM) %>% count() %>% 
+  ggplot(aes(fill=LNM, y=n, x=age.40.65)) + 
+  geom_bar(position="fill", stat="identity")+
+  labs(x='',y='Proportion',fill='Stage N',title='METABRIC \n P = 4.82 × 10-3')+
+  scale_fill_manual(values=c('#DCE6F2','#B9CDE5'))+theme_pubr()+
+  theme(legend.position="right",
+        plot.title = element_text(color="black", size=15,face="plain",hjust = 0.5,family ="sans"))
+
+## ============age groups vs grade============
+table(metabric.pheno$age.40.65, metabric.pheno$GRADE) %>% chisq.test()
+metabric.pheno %>% filter(!is.na(GRADE)) %>% dplyr::group_by(age.40.65, GRADE) %>% count() %>% 
+  ggplot(aes(fill=GRADE, y=n, x=age.40.65)) + 
+  geom_bar(position="fill", stat="identity")+
+  labs(x='',y='Proportion',fill='Grade',title='METABRIC \nP = 3.06 × 10-8')+
+  scale_fill_manual(values=c('#DCE6F2','#B9CDE5','#95B3D7'))+theme_pubr()+
+  theme(legend.position="right",
+        plot.title = element_text(color="black", size=15,face="plain",hjust = 0.5,family ="sans"))
+
+## ============age groups vs TNBC============
+table(metabric.pheno$age.40.65, metabric.pheno$TNBC_SUBTYPE) %>% chisq.test()
+metabric.pheno %>% dplyr::group_by(age.40.65, TNBC_SUBTYPE) %>% count() %>% 
+  ggplot(aes(fill=TNBC_SUBTYPE, y=n, x=age.40.65)) + 
+  geom_bar(position="fill", stat="identity")+
+  labs(x='',y='Proportion',fill='',title='METABRIC \nP = 3.52 × 10-14')+
+  scale_fill_manual(values = TNBC.col)+theme_pubr()+
+  theme(legend.position="right",
+        plot.title = element_text(color="black", size=15,face="plain",hjust = 0.5,family ="sans"))
+
+## ============ age groups vs PAM50============
+table(metabric.pheno$age.40.65, metabric.pheno$PAM50_SUBTYPE) %>% chisq.test()
+metabric.pheno %>% dplyr::group_by(age.40.65, PAM50_SUBTYPE) %>% count() %>% 
+  ggplot(aes(fill=PAM50_SUBTYPE, y=n, x=age.40.65)) + 
+  geom_bar(position="fill", stat="identity")+
+  labs(x='',y='Proportion',fill='',title='METABRIC \nP < 2.2 × 10-16')+
+  scale_fill_manual(values = pam50.col)+theme_pubr()+
+  theme(legend.position="right",
+        plot.title = element_text(color="black", size=15,face="plain",hjust = 0.5,family ="sans"))
+
+## ============= age group vs IHC =================
+table(metabric.pheno$age.40.65, metabric.pheno$ER_STATUS) %>% chisq.test()
+table(metabric.pheno$age.40.65, metabric.pheno$PR_STATUS) %>% chisq.test()
+table(metabric.pheno$age.40.65, metabric.pheno$HER2_STATUS) %>% chisq.test()
+
+p1<-metabric.pheno %>% dplyr::group_by(age.40.65, ER_STATUS) %>% count() %>% 
+  ggplot(aes(fill=ER_STATUS, y=n, x=age.40.65)) + 
+  geom_bar(position="fill", stat="identity")+
+  labs(x='',y='Proportion',fill='ER status',title='METABRIC \n P < 2.20 × 10-16')+
+  scale_fill_manual(values=c('#DCE6F2','#95B3D7'))+theme_pubr()+
+  theme(legend.position="top",
+        plot.title = element_text(color="black", size=15,face="plain",hjust = 0.5,family ="sans"))
+
+p2<-metabric.pheno %>% dplyr::group_by(age.40.65, PR_STATUS) %>% count() %>% 
+  ggplot(aes(fill=PR_STATUS, y=n, x=age.40.65)) + 
+  geom_bar(position="fill", stat="identity")+
+  labs(x='',y='Proportion',fill='PR status',title='METABRIC \n P = 3.07 × 10-7')+
+  scale_fill_manual(values=c('#DCE6F2','#95B3D7'))+theme_pubr()+
+  theme(legend.position="top",
+        plot.title = element_text(color="black", size=15,face="plain",hjust = 0.5,family ="sans"))
+
+p3<-metabric.pheno %>% dplyr::group_by(age.40.65, HER2_STATUS) %>% count() %>% 
+  ggplot(aes(fill=HER2_STATUS, y=n, x=age.40.65)) + 
+  geom_bar(position="fill", stat="identity")+
+  labs(x='',y='Proportion',fill='HER2 status',title='METABRIC \n P = 1.10 × 10-7')+
+  scale_fill_manual(values=c('#DCE6F2','#95B3D7'))+theme_pubr()+
+  theme(legend.position="top",
+        plot.title = element_text(color="black", size=15,face="plain",hjust = 0.5,family ="sans"))
+
+cowplot::plot_grid(p1,p2,p3,ncol=3)
+
+
+## =======stratified age & subtype in RFS==========
+tmp<-list()
+for(x in c('Basal','Her2','LumA','LumB','Normal')){
+  tmp[[x]]<-survfit(Surv(RFS.time.10, RFS.10) ~ age.40.65, data=metabric.pheno[metabric.pheno$PAM50_SUBTYPE == x,]) %>% 
+    ggsurvplot(
+      pval = TRUE,conf.int = F,pval.coord = c(0.3, 0.3),
+      risk.table = F,risk.table.col = "strata",size=1,pval.size=8,
+      xlab='Follow up (months)', ylab='RFS (%)',
+      legend.title = '',legend.lab=c('40-', '41-55','56-65','66+'),
+      ggtheme = theme_classic2(), legend='none', ylim=c(0.2,1),
+      font.x = 15,font.y=15,font.main=18,font.legend=15,font.tickslab=12,palette = age.group.color
+    )+ggtitle(x)
+}
+arrange_ggsurvplots(tmp, print = TRUE, ncol = 5, nrow=1, byrow=T)
+rm(x, tmp)
+
+tmp<-list()
+for(x in c('40-', '41-55','56-65','66+')){
+  tmp[[x]]<-survfit(Surv(RFS.time.10, RFS.10) ~ PAM50_SUBTYPE, data=metabric.pheno[metabric.pheno$age.40.65 == x,]) %>% 
+    ggsurvplot(
+      pval = TRUE,conf.int = F,pval.coord = c(0.3, 0.3),
+      risk.table = F,risk.table.col = "strata",size=1,pval.size=8,
+      xlab='Follow up (months)', ylab='RFS (%)',
+      legend.title = '',legend.lab=c('Basal', 'Her2','LumA','LumB','Normal'),
+      ggtheme = theme_classic2(), legend='none', ylim=c(0.2,1),
+      font.x = 15,font.y=15,font.main=18,font.legend=15,font.tickslab=12,
+      palette = pam50.col
+    )+ggtitle(x)
+}
+arrange_ggsurvplots(tmp, print = TRUE, nrow=1,ncol=5)
+```
+
+## TCGA-BRCA
+
+```{r}
+## ======== OS age group =============
+tmp<-cbind(pheno.bc[,c('age.45','age.40','age.35','age.40.65')], bc.survival)
+survfit(Surv(OS.time.10, OS.10) ~ age.40.65, data=tmp) %>% 
+  ggsurvplot(
+    pval = TRUE,conf.int = F,pval.coord = c(0.3, 0.3),
+    risk.table = T,risk.table.col = "black",size=1,pval.size=8,
+    xlab='Follow up (months)', ylab='OS (%)',
+    legend.title = '',legend.lab=c('40-', '41-55','56-65','66+'),
+    ggtheme = theme_classic2(),legend=c(0.1,0.4), ylim=c(0.25,1),
+    font.x = 15,font.y=15,font.main=18,font.legend=15,font.tickslab=12,palette = age.group.color
+  )+ggtitle('TCGA-BRCA')
+
+survfit(Surv(DFI.time.10, DFI.10) ~ age.40.65, data=tmp) %>% 
+  ggsurvplot(
+    pval = TRUE,conf.int = F,pval.coord = c(0.3, 0.3),
+    risk.table = T,risk.table.col = "black",size=1,pval.size=8,
+    xlab='Follow up (months)', ylab='DFS (%)',
+    legend.title = '',legend.lab=c('40-', '41-55','56-65','66+'),
+    ggtheme = theme_classic2(),legend='none', ylim=c(0.2,1),
+    font.x = 15,font.y=15,font.main=18,font.legend=15,font.tickslab=12,palette = age.group.color
+  )+ggtitle('TCGA-BRCA')
+rm(tmp)
+
+##=========== T stage============
+table(pheno.bc$pathologic_T)
+tmp<-pheno.bc %>% filter(pathologic_T %in% c('T0','T1a','T1b','T1c','T2','T2b','T3','T4a','T4b','T4c','T4d')) %>% 
+  dplyr::mutate(pathologic_T=str_replace(pathologic_T,'a|b|c|d',''))
+table(tmp$pathologic_T)
+table(tmp[['age.40.65']], tmp[['pathologic_T']]) %>% chisq.test()
+
+tmp %>% dplyr::group_by_('age.40.65', 'pathologic_T') %>% count() %>% 
+  ggplot(aes_string(fill='pathologic_T', y='n', x='age.40.65')) + 
+  geom_bar(position="fill", stat="identity")+
+  labs(x='',y='Proportion',fill='Stage T',
+       title=paste0('TCGA-BRCA \nP = 6.82 × 10-03'))+
+  scale_fill_manual(values=c('#DCE6F2','#B9CDE5','#95B3D7','#376092'))+theme_pubr()+
+  theme(legend.position="right",
+        plot.title = element_text(color="black", size=15,face="plain",hjust = 0.5,family ="sans"))
+rm(tmp)
+
+##============ N stage=============
+table(pheno.bc$pathologic_N)
+tmp<-pheno.bc %>% dplyr::mutate(pathologic_N = str_sub(pathologic_N,1,2)) %>% filter(pathologic_N %in% c('N0','N1','N2','N3'))
+table(tmp$pathologic_N)
+table(tmp[['age.40.65']], tmp[['pathologic_N']]) %>% chisq.test()
+
+tmp %>% dplyr::mutate(pathologic_N=gsub('N','',pathologic_N)) %>% 
+  dplyr::group_by_('age.40.65', 'pathologic_N') %>% count() %>% 
+  ggplot(aes_string(fill='pathologic_N', y='n', x='age.40.65')) + 
+  geom_bar(position="fill", stat="identity")+
+  labs(x='',y='Proportion',fill='Stage N',
+       title=paste0('TCGA-BRCA \nP = 8.80 × 10-02'))+
+  scale_fill_manual(values=c('#DCE6F2','#B9CDE5','#95B3D7','#376092'))+theme_pubr()+
+  theme(legend.position="right",
+        plot.title = element_text(color="black", size=15,face="plain",hjust = 0.5,family ="sans"))
+rm(tmp)
+
+## ============= age group vs IHC ================
+tmp <- bc.subtype %>% filter(er_status_by_ihc %in% c('Negative','Positive'))
+table(tmp$age.40.65, tmp$er_status_by_ihc) %>% chisq.test()
+p1<-tmp %>% dplyr::group_by(age.40.65, er_status_by_ihc) %>% count() %>% 
+  ggplot(aes(fill=er_status_by_ihc, y=n, x=age.40.65)) + 
+  geom_bar(position="fill", stat="identity")+
+  labs(x='',y='Proportion',fill='ER status',title='TCGA-BRCA \n P = 0.037')+
+  scale_fill_manual(values=c('#DCE6F2','#95B3D7'))+theme_pubr()+
+  theme(legend.position="top",
+        plot.title = element_text(color="black", size=15,face="plain",hjust = 0.5,family ="sans"))
+
+
+tmp <- bc.subtype %>% filter(pr_status_by_ihc %in% c('Negative','Positive'))
+table(tmp$age.40.65, tmp$pr_status_by_ihc) %>% chisq.test()
+p2<-tmp %>% dplyr::group_by(age.40.65, pr_status_by_ihc) %>% count() %>% 
+  ggplot(aes(fill=pr_status_by_ihc, y=n, x=age.40.65)) + 
+  geom_bar(position="fill", stat="identity")+
+  labs(x='',y='Proportion',fill='PR status',title='TCGA-BRCA \n P = 0.115')+
+  scale_fill_manual(values=c('#DCE6F2','#95B3D7'))+theme_pubr()+
+  theme(legend.position="top",
+        plot.title = element_text(color="black", size=15,face="plain",hjust = 0.5,family ="sans"))
+
+tmp <- bc.subtype %>% filter(her2_status_by_ihc %in% c('Negative','Positive'))
+table(tmp$age.40.65, tmp$her2_status_by_ihc) %>% chisq.test()
+p3<-tmp %>% dplyr::group_by(age.40.65, her2_status_by_ihc) %>% count() %>% 
+  ggplot(aes(fill=her2_status_by_ihc, y=n, x=age.40.65)) + 
+  geom_bar(position="fill", stat="identity")+
+  labs(x='',y='Proportion',fill='HER2 status',title='TCGA-BRCA \n P = 0.312')+
+  scale_fill_manual(values=c('#DCE6F2','#95B3D7'))+theme_pubr()+
+  theme(legend.position="top",
+        plot.title = element_text(color="black", size=15,face="plain",hjust = 0.5,family ="sans"))
+cowplot::plot_grid(p1,p2,p3,ncol=3)
+```
+
+## SYSUCC
+
+```{r}
+## =========== RFS age group ===========
+survfit(Surv(RFS.time.10, RFS.10) ~ age.40.65, data=bc.sample) %>% 
+  ggsurvplot(
+    pval = TRUE,conf.int = F,pval.coord = c(0.3, 0.3),
+    risk.table = T,risk.table.col = "black",pval.size=8,
+    xlab='Follow up (months)', ylab='RFS (%)',
+    legend.title = '',legend.lab=c('40-','41-55','55-65','66+'),
+    ggtheme = theme_classic2(),legend=c(0.1,0.4), ylim=c(0.2,1),
+    font.x = 15,font.y=15,font.main=18,font.legend=15,font.tickslab=12,palette = age.group.color
+  )+ggtitle('SYSU')
+
+bc.sample %>% dplyr::group_by(age.40.65, LNM) %>% count() %>% 
+  ggplot(aes(fill=LNM, y=n, x=age.40.65)) + 
+  geom_bar(position="fill", stat="identity")+
+  labs(x='',y='Proportion',fill='Stage N',title='SYSU \n P = 1.03e-01')+
+  scale_fill_manual(values=c('#DCE6F2','#B9CDE5'))+theme_pubr()+
+  theme(legend.position="right",
+        plot.title = element_text(color="black", size=15,face="plain",hjust = 0.5,family ="sans"))
+
+bc.sample %>% filter(!is.na(Grade)) %>% dplyr::group_by(age.40.65, Grade) %>% count() %>% 
+  dplyr::mutate(Grade=as.character(Grade)) %>% 
+  ggplot(aes(fill=Grade, y=n, x=age.40.65)) + 
+  geom_bar(position="fill", stat="identity")+
+  labs(x='',y='Proportion',fill='Grade',title='P = 4.50 × 10-01')+
+  scale_fill_manual(values=c('#DCE6F2','#B9CDE5','#95B3D7'))+theme_pubr()+
+  theme(legend.position="right",
+        plot.title = element_text(color="black", size=15,face="plain",hjust = 0.5,family ="sans"))
+
+table(bc.sample$ER, bc.sample$age.40.65) %>% chisq.test()
+p1<-bc.sample %>% filter(!is.na(ER)) %>% dplyr::group_by(age.40.65, ER) %>% count() %>% 
+  dplyr::mutate(ER=as.character(ER)) %>% 
+  dplyr::mutate(ER=ifelse(ER == '0','Negative','Positive')) %>% 
+  ggplot(aes(fill=ER, y=n, x=age.40.65)) + 
+  geom_bar(position="fill", stat="identity")+
+  labs(x='',y='Proportion',fill='ER status',title='SYSU \nP = 0.678')+
+  scale_fill_manual(values=c('#DCE6F2','#95B3D7'))+theme_pubr()+
+  theme(legend.position="top",
+        plot.title = element_text(color="black", size=15,face="plain",hjust = 0.5,family ="sans"))
+
+tmp <- bc.sample[bc.sample$PR %in% c('0','1'),]
+table(tmp$PR, tmp$age.40.65) %>% chisq.test()
+p2<-tmp %>% filter(!is.na(PR)) %>% dplyr::group_by(age.40.65, PR) %>% count() %>% 
+  dplyr::mutate(PR=as.character(PR)) %>% 
+  dplyr::mutate(PR=ifelse(PR == '0','Negative','Positive')) %>% 
+  ggplot(aes(fill=PR, y=n, x=age.40.65)) + 
+  geom_bar(position="fill", stat="identity")+
+  labs(x='',y='Proportion',fill='PR status',title='SYSU \nP = 0.311')+
+  scale_fill_manual(values=c('#DCE6F2','#95B3D7'))+theme_pubr()+
+  theme(legend.position="top",
+        plot.title = element_text(color="black", size=15,face="plain",hjust = 0.5,family ="sans"))
+
+tmp <- bc.sample[bc.sample$HER2 %in% c('0','1'),]
+table(tmp$HER2, tmp$age.40.65) %>% chisq.test()
+p3<-tmp %>% filter(!is.na(HER2)) %>% dplyr::group_by(age.40.65, HER2) %>% count() %>% 
+  dplyr::mutate(HER2=as.character(HER2)) %>% 
+  dplyr::mutate(HER2=ifelse(HER2 == '0','Negative','Positive')) %>% 
+  ggplot(aes(fill=HER2, y=n, x=age.40.65)) + 
+  geom_bar(position="fill", stat="identity")+
+  labs(x='',y='Proportion',fill='HER2 status',title='SYSU \nP = 0.054')+
+  scale_fill_manual(values=c('#DCE6F2','#95B3D7'))+theme_pubr()+
+  theme(legend.position="top",
+        plot.title = element_text(color="black", size=15,face="plain",hjust = 0.5,family ="sans"))
+cowplot::plot_grid(p1,p2,p3,ncol=3)
+```

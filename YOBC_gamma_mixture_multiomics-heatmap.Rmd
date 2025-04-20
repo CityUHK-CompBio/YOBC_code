@@ -1,0 +1,139 @@
+---
+title: "Gamma mixture model and multi-omics heatmap"
+author: "Jiang Li"
+output: html_document
+date: "2025-04-18"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Gamma mixture model fitting and visualization
+```{r}
+mb.gamma.model<-mixfit(mb.DNAm.age$aging.rate,ncomp = 2, family = 'gamma')
+
+gamma.density <- function(x, model = NULL, smoothness=512, cut=3.8){
+  at <- sort(x, decreasing = F)
+  res <- matrix(NA, ncol = length(model$pi), nrow = length(at))
+  for (i in 1: length(model$pi)){
+    res[,i] <- dgamma(at, shape = model$alpha[i], rate = model$lambda[i]) * model$pi[i]
+  }
+  colnames(res) <- paste0('Comp',1:length(model$pi))
+  y <- apply(res, 1, sum)
+  return(list(x = at, y = y, comp = res))
+}
+density.mb <- gamma.density(mb.DNAm.age$aging.rate, model = mb.gamma.model)
+ggplot() + geom_histogram(aes(x = mb.DNAm.age$aging.rate, y = ..density..), color = "black", fill = "white", size = 0.3)+
+  geom_polygon(data = data.frame(x = rep(density.mb$x, length(mb.gamma.model$pi)),
+                                 comp = rep(1:length(mb.gamma.model$pi), each = length(mb.DNAm.age$aging.rate)),
+                                 y = as.vector(density.mb$comp)), 
+               aes(x, y, fill = as.factor(comp)), alpha = 0.4) + 
+  geom_path(data = data.frame(x = density.mb$x, y = density.mb$y), aes(x, y))+
+  labs(x='Aging rate', y='Density', fill='Comp')+theme_classic()
+```
+
+## Multi-omics heatmap
+```{r}
+anno<-mb.DNAm.age[,c('PATIENT_ID','AGE_AT_DIAGNOSIS','PAM50_SUBTYPE','TNBC_SUBTYPE','gamma.subtype','ER_STATUS','PR_STATUS','HER2_STATUS','aging.rate')] %>% 
+  arrange(aging.rate) %>% left_join(metabric.estimate[,c('PATIENT_ID','ImmuneScore')]) %>% 
+  left_join(mean.methylation[,c('PATIENT_ID','methy.level')]) %>% left_join(metabric.scna[,c('PATIENT_ID','scna.counts')])
+anno$ImmuneScore <- (anno$ImmuneScore - min(anno$ImmuneScore))/(max(anno$ImmuneScore) - min(anno$ImmuneScore))
+anno<-anno %>% left_join(mb.DNAm.maf@data[mb.DNAm.maf@data$Hugo_Symbol %in% c('PIK3CA'),c('Tumor_Sample_Barcode','Hugo_Symbol')], by=c('PATIENT_ID'='Tumor_Sample_Barcode')) %>% 
+  dplyr::mutate(PIK3CA=ifelse(!is.na(Hugo_Symbol),'MUT','WT')) %>% dplyr::select(-c(Hugo_Symbol)) %>% unique()
+anno<-anno %>% left_join(mb.DNAm.maf@data[mb.DNAm.maf@data$Hugo_Symbol %in% c('GATA3'),c('Tumor_Sample_Barcode','Hugo_Symbol')], by=c('PATIENT_ID'='Tumor_Sample_Barcode')) %>% 
+  dplyr::mutate(GATA3=ifelse(!is.na(Hugo_Symbol),'MUT','WT')) %>% dplyr::select(-c(Hugo_Symbol)) %>% unique()
+anno<-anno %>% left_join(mb.DNAm.maf@data[mb.DNAm.maf@data$Hugo_Symbol %in% c('TP53'),c('Tumor_Sample_Barcode','Hugo_Symbol')], by=c('PATIENT_ID'='Tumor_Sample_Barcode')) %>% 
+  dplyr::mutate(TP53=ifelse(!is.na(Hugo_Symbol),'MUT','WT')) %>% dplyr::select(-c(Hugo_Symbol)) %>% unique()
+anno<-anno %>% left_join(mb.DNAm.maf@data[mb.DNAm.maf@data$Hugo_Symbol %in% c('BRCA1'),c('Tumor_Sample_Barcode','Hugo_Symbol')], by=c('PATIENT_ID'='Tumor_Sample_Barcode')) %>% 
+  dplyr::mutate(BRCA1=ifelse(!is.na(Hugo_Symbol),'MUT','WT')) %>% dplyr::select(-c(Hugo_Symbol)) %>% unique()
+anno<-anno %>% left_join(mb.DNAm.maf@data[mb.DNAm.maf@data$Hugo_Symbol %in% c('BRCA2'),c('Tumor_Sample_Barcode','Hugo_Symbol')], by=c('PATIENT_ID'='Tumor_Sample_Barcode')) %>% 
+  dplyr::mutate(BRCA2=ifelse(!is.na(Hugo_Symbol),'MUT','WT')) %>% dplyr::select(-c(Hugo_Symbol)) %>% unique()
+rownames(anno)<-anno$PATIENT_ID
+anno<-anno[,c('AGE_AT_DIAGNOSIS','methy.level','scna.counts','ImmuneScore','PIK3CA','TP53',
+              'BRCA1','BRCA2','ER_STATUS','PR_STATUS','HER2_STATUS','TNBC_SUBTYPE','PAM50_SUBTYPE','aging.rate','gamma.subtype')]
+colnames(anno)<-c('Age','Methylation','SCNA counts','Immune score',
+                  'PIK3CA','TP53','BRCA1','BRCA2','ER','PR','HER2',
+                  'TNBC subtype','PAM50 subtype','Aging rate','Gamma subtype')
+anno <- anno[,ncol(anno):1]
+anno_cols <- list(
+  'PAM50 subtype'=c('Basal'='#8ECFC9','Her2'='#FFBE7A','LumA'='#FA7F6F','LumB'='#82B0D2','Normal'='#BEB8DC'),
+  'TNBC subtype'=c('non-TNBC'='#5E98D3', 'TNBC'='#D86364'),
+  'Gamma subtype'=c('G1'='#ffa974','G2'='#ff715a','G3'='#ff3757'),
+  'ER'=c('Positive'='#2D2D2D','Negative'='#EAEAEA'),
+  'PR'=c('Positive'='#2D2D2D','Negative'='#EAEAEA'),
+  'HER2'=c('Positive'='#2D2D2D','Negative'='#EAEAEA'),
+  'PIK3CA'=c('MUT'='#2D2D2D','WT'='#EAEAEA'),
+  'TP53'=c('MUT'='#2D2D2D','WT'='#EAEAEA'),
+  'BRCA1'=c('MUT'='#2D2D2D','WT'='#EAEAEA'),
+  'BRCA2'=c('MUT'='#2D2D2D','WT'='#EAEAEA'),
+  'Aging rate'=circlize::colorRamp2(c(0, 8), c("#FFFFFF", "#5F5F5F")),
+  'Methylation'=circlize::colorRamp2(c(0, 0.2), c("#FFFFFF", "#2D2D2D")),
+  'Age'=circlize::colorRamp2(c(20, 100), c("#FFFFFF", "#5F5F5F")),
+  'Immune score'=circlize::colorRamp2(c(0, 1), c("#FFFFFF", "#2D2D2D")),
+  'SCNA counts'=circlize::colorRamp2(c(2, 20000), c("#FFFFFF", "#2D2D2D"))
+)
+
+rna.seq.gene<-c('HLA-A','HLA-B','HLA-C','TAP1','TAP2','B2M','CD8A','CD4','CD14','FCGR3A','PDCD1','LAG3','IDO1','TIGIT','HAVCR2',
+                'CD274','PDCD1LG2','CTLA4','C10or54','CD276','VTCN1','TP53', 'GADD45A', 'MYC', 'FOXM1', 'RB1', 'CDKN1A', 'CDKN2C', 
+                'CDKN2A', 'CCNE1','GATA3','FOXA1','XBP1','MYB','TBX3','RUNX1','CBFB','AFF2')
+
+rna.seq.gene<-rna.seq.gene[rna.seq.gene %in% rownames(metabric.expr)]
+rna.seq.gene<-rna.seq.gene[rna.seq.gene %in% c(
+  targets.limma %>% filter(P.Value < 0.05 & abs(logFC) > 0.25) %>% rownames(),
+  tf.limma %>% filter(P.Value < 0.05 & abs(logFC) > 0.25) %>% rownames()
+)]
+rna.seq.gene<-rbind(targets.limma, tf.limma)[rna.seq.gene,] %>% arrange(logFC) %>% rownames()
+hp.mat2<-metabric.expr[rna.seq.gene,rownames(anno)] %>% t() %>% scale() %>% t()
+
+hp.mat2[hp.mat2 > 1] <- 1
+hp.mat2[hp.mat2 < -1] <- (-1)
+
+cnv.gene<-list(
+  'Cell cycle'=c('MCL1','MYC','CCNE1','CCND1','CCND3','CDKN1B','CDKN2A','CDKN2C','CDK4','CDK6','RB1'),
+  'DNA repair'=c('BRCA1','BRCA2','ATM','FANCD2','CHEK1'),
+  'PI3K'=c('PIK3CA','PTEN','PIK3R1','AKT1','INPP4B','ERBB2','EGFR','HER3','ESR1'),
+  'Notch'=c('NOTCH1','NOTCH2','NOTCH3','FBXW7'),
+  'MAPK'=c('BRAF','HRAS','MAP2K1','MAP3K1','MAP2K4','KRAS','MAPK9','NF1'),
+  'Epigenetic'=c('DNMT1','ASH2L','ASXL2','ASXL3','EZH2','ARID1A','ARID1B','KDM6A','KMT2C','BAP1','SMARCA4','SMARCAD1','BCL7C','HCFC1'),
+  'Immune'=c('B2M','CD274','PDCD1LG2','CTLA4','IDO1'),
+  'Others'=c('CDH1','BCL2','FGFR1','FGFR2','FGFR3','FGFR4','IGFR1')
+)
+
+hp.mat3<-metabric.cna[unlist(cnv.gene), rownames(anno)]
+hp.mat3 <- lapply(hp.mat3, function(x){
+  x[x == '0'] <- 'Neutral'
+  x[x == '1'] <- 'Gain'
+  x[x == '-1'] <- 'Loss'
+  x[x == '2'] <- 'Amplification'
+  x[x == '-2'] <- 'Deletion'
+  return(x)
+}) %>% as.data.frame() %>% 
+  magrittr::set_colnames(rownames(anno)) %>% 
+  magrittr::set_rownames(unlist(cnv.gene)) %>% 
+  as.matrix()
+
+pdf(file="METABRIC_multi_omcs_heatmap.pdf", width=8.3, height=11.7)
+Heatmap(
+  hp.mat2, col = colorRampPalette(c("#19A1FA", "#FFFFFF", "#ED3C53"))(100), name='RNA-seq (z-score)',
+  top_annotation = HeatmapAnnotation(df=anno, col=anno_cols,
+                                     gp = gpar(fontsize=5),
+                                     simple_anno_size = unit(3.5, "mm"),
+                                     annotation_name_gp= gpar(fontsize = 9)),
+  left_annotation = rowAnnotation(foo=anno_block(
+                                                 labels = c("Gene expression (RNA-seq)"), 
+                                                 labels_gp = gpar(col = "black", fontsize = 8))),
+  cluster_rows = F, cluster_columns = F, show_row_names = T, show_column_names = F,
+  height = 1, row_names_gp = gpar(fontsize = 9)
+)  %v% 
+  Heatmap(
+    hp.mat3, name='Copy number alteration', col=structure(c('#5385AD', '#B3C7D7', '#EAEAE8','#DF979D', '#BA0F28'), names = c('Deletion','Loss','Neutral','Gain','Amplification')),
+    row_split = rep(names(cnv.gene), sapply(cnv.gene, length)),height = 2,row_names_gp = gpar(fontsize = 9),
+    cluster_rows = F, cluster_columns = F, show_column_names = F,border = TRUE, row_title = NULL,
+    left_annotation = rowAnnotation(foo=anno_block(
+                                                   labels = sort(names(cnv.gene)),
+                                                   labels_gp = gpar(col = "black", fontsize = 8)))
+  ) %>% draw(column_split = anno$`Gamma subtype`)
+dev.off()
+```
+
